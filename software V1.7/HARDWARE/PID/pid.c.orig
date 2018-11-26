@@ -1,0 +1,229 @@
+#include "pid.h"
+#include "led.h"
+#include "usart.h"
+#include "pwm.h"
+#include "adc.h"
+volatile int adcx, adcx1;
+volatile int Xpwm, Ypwm;
+volatile float PX,IX,DX,PY,IY,DY;
+u8 Xdirection, Ydirection;
+//定义一个PID控制参数的结构体
+typedef struct
+{
+    float xP;
+    float xI;
+    float xD;
+    float xSumError;  											//积分项
+    float xLastError;											//前一次误差
+    float yP;
+    float yI;
+    float yD;
+    float ySumError;  											//积分项
+    float yLastError;											//前一次误差
+} PID_typedef;
+
+
+//pid调节结构体定义
+PID_typedef	PID_DA;											//定义PID结构体
+
+#define XP 2.2f                  			//PID参数的值
+#define XI 0.0f               		    //加f表示用浮点的形式保存
+#define XD 13.5f                   		//
+#define YP 2.2f
+#define YI 0.0f
+#define YD 13.5f
+#define X_DIRECTION_FLAG	0x01         //方向变量标志位
+#define Y_DIRECTION_FLAG	0x01         //
+
+
+/*****************************************************************************************
+函数功能：XPID控制输出计算函数
+输入：Current：当前值，Setpoint：期望值，PID—data：PID三个参数
+输出：控制输出增量
+日期：2016/12/20
+*****************************************************************************************/
+int XPIDCalc(float Current, float SetPoint, PID_typedef* PID_Data) //current是当前值，setpoint是期望值。
+{
+    float iError, dError;
+    int output;
+    iError = SetPoint - Current;  					//偏差
+//	if(iError==0) PID_Data->xSumError=0;
+//    else PID_Data->xSumError += iError;  					//积分
+    dError = iError -  PID_Data->xLastError; //微分
+    PID_Data->xLastError = iError;
+	PX=PID_Data->xP * iError ;
+//	IX=PID_Data->xI *  PID_Data->xSumError ;  
+	DX=PID_Data->xD * dError; 	//PID Calculater 
+	output = PX+DX;
+    if (output >= 2000)
+    {
+        output = 2000;
+    }
+    else if (output <= -2000)
+    {
+        output = -2000;
+    }
+    return output;      //返回增量值
+}
+
+
+/*****************************************************************************************
+函数功能：YPID控制输出计算函数
+输入：Current：当前值，Setpoint：期望值，PID—data：PID三个参数
+输出：控制输出增量
+日期：2016/12/20
+*****************************************************************************************/
+int YPIDCalc(float Current, float SetPoint, PID_typedef* PID_Data) //current是当前值，setpoint是期望值。
+{
+    float iError, dError;
+    int output;
+    iError = SetPoint - Current;  					//偏差
+//    if(iError==0) PID_Data->xSumError=0;
+//    else PID_Data->xSumError += iError;  					//积分
+    dError = iError -  PID_Data->yLastError; //微分
+    PID_Data->yLastError = iError;
+	PY=PID_Data->yP * iError ;
+//	IY=PID_Data->yI *  PID_Data->ySumError ;  
+	DY=PID_Data->yD * dError; 	//PID Calculater
+	output=PY+DY;
+    if (output >= 2000)
+    {
+        output = 2000;
+    }
+    else if (output <= -2000)
+    {
+        output = -2000;
+    }
+    return output;      //返回增量值
+}
+
+/*****************************************************************************************
+函数功能：PID控制初始化，对各参数进行初始化并启动定时器
+输入：无
+输出：无
+日期：2016/7/15
+*****************************************************************************************/
+void PID_Init(void)
+{
+    //  PID调节初始化
+    PID_DA.xP = XP;
+    PID_DA.xI = XI;
+    PID_DA.xD = XD;
+    PID_DA.xSumError = 0;		//积分误差
+    PID_DA.xLastError = 0;		//前一次误差
+    PID_DA.yP = YP;
+    PID_DA.yI = YI;
+    PID_DA.yD = YD;
+    PID_DA.ySumError = 0;		//积分误差
+    PID_DA.yLastError = 0;		//前一次误差
+}
+/*****************************************************************************************
+函数功能：PID控制参数调试，修改Kp，Ki,Kd的参数
+输入：u16 Kp,u16 Ki,u16 Kd
+输出：无
+日期：2017/4/8
+*****************************************************************************************/
+void PID_setpara(u16 xKp, u16 xKi, u16 xKd, u16 yKp, u16 yKi, u16 yKd)
+{
+    PID_DA.xP = (float)xKp / 10;
+    PID_DA.xI = (float)xKi / 10;
+    PID_DA.xD = (float)xKd / 10;
+    PID_DA.yP = (float)yKp / 10;
+    PID_DA.yI = (float)yKi / 10;
+    PID_DA.yD = (float)yKd / 10;
+    printf("xP=%.2fxI=%.2fxD=%.2fyP=%.2fyI=%.2fyD=%.2f\r\n", PID_DA.xP, PID_DA.xI, PID_DA.xD, PID_DA.yP, PID_DA.yI, PID_DA.yD);
+}
+/*****************************************************************************************
+函数功能：定时器3中断初始化函数
+输入：u16 计数次数, u16 预分频
+输出：无
+日期：2016/12/13
+*****************************************************************************************/
+void TIM3_Int_Init(u16 arr, u16 psc)
+{
+    TIM_TimeBaseInitTypeDef  TIM_TimeBaseStructure;
+    NVIC_InitTypeDef NVIC_InitStructure;
+
+    RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM3, ENABLE); //时钟使能
+
+    TIM_TimeBaseStructure.TIM_Period = arr; //设置在下一个更新事件装入活动的自动重装载寄存器周期的值
+    TIM_TimeBaseStructure.TIM_Prescaler = psc; //设置用来作为TIMx时钟频率除数的预分频值  10Khz的计数频率
+    TIM_TimeBaseStructure.TIM_ClockDivision = 0; //设置时钟分割:TDTS = Tck_tim
+    TIM_TimeBaseStructure.TIM_CounterMode = TIM_CounterMode_Up;  //TIM向上计数模式
+    TIM_TimeBaseInit(TIM3, &TIM_TimeBaseStructure); //根据TIM_TimeBaseInitStruct中指定的参数初始化TIMx的时间基数单位
+
+    TIM_ITConfig(TIM3, TIM_IT_Update, ENABLE); //使能或者失能指定的TIM中断	TIM3  使能
+
+    NVIC_InitStructure.NVIC_IRQChannel = TIM3_IRQn;  //TIM3中断
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 0;  //先占优先级0级
+    NVIC_InitStructure.NVIC_IRQChannelSubPriority = 3;  //从优先级3级
+    NVIC_InitStructure.NVIC_IRQChannelCmd = ENABLE; //IRQ通道被使能
+    NVIC_Init(&NVIC_InitStructure);  //根据NVIC_InitStruct中指定的参数初始化外设NVIC寄存器
+
+    TIM_Cmd(TIM3, ENABLE);  //使能TIMx外设
+
+}
+
+
+/*****************************************************************************************
+函数功能：中断服务程序，用于AD采电压和电流和PID控制PWM输出
+输入：无
+输出：无
+日期：2016/7/15
+*****************************************************************************************/
+
+void TIM3_IRQHandler(void)      //TIM1中断
+{
+    if (TIM_GetITStatus(TIM3, TIM_IT_Update) != RESET) //检查指定的TIM中断发生与否:TIM 中断源
+    {
+        TIM_ClearITPendingBit(TIM3, TIM_IT_Update );  //清除TIMx的中断待处理位:TIM 中断源
+        /********************************PID计算*******************************/
+        Xpwm = XPIDCalc(adcx, 2048, &PID_DA);  						//调用PID算法
+        Ypwm = YPIDCalc(adcx1, 2048, &PID_DA);  						//调用PID算法
+        if(Xpwm >= 0)
+        {   //Xpwm>0时，说明浮子在左，所以要向右吸
+            Xdirection = 0x01;
+            TIM_OC1PolarityConfig(TIM1, TIM_OCPolarity_Low);
+        }
+        else                                                      //Xpwm<0时，说明浮子在右，所以要向左吸
+        {
+            Xdirection = 0x02;
+            TIM_OC1PolarityConfig(TIM1, TIM_OCPolarity_High);
+            Xpwm = -Xpwm;
+        }
+        if(Ypwm >= 0)   											 //Ypwm>0时，说明浮子在上，所以要向下吸
+        {
+            Ydirection = 0x01;
+            TIM_OC4PolarityConfig(TIM1, TIM_OCPolarity_Low);
+        }
+        else                                                      //Ypwm<0时，说明浮子在下，所以要向上吸
+        {
+            Ydirection = 0x02;
+            TIM_OC4PolarityConfig(TIM1, TIM_OCPolarity_High);
+            Ypwm = -Ypwm;
+        }
+        /*******************************方向控制*******************************/
+
+        if(Xdirection & X_DIRECTION_FLAG)
+        {
+            Xout = 0;        //x轴向右吸
+        }
+        else
+        {
+            Xout = 1;        //x轴向左吸
+        }
+        if (Ydirection & Y_DIRECTION_FLAG)
+        {
+            Yout = 0;			//y轴向下吸
+        }
+        else
+        {
+            Yout = 1;		  //y轴向上吸
+        }
+        TIM_SetCompare1(TIM1, Xpwm); //设置pwm值
+        TIM_SetCompare4(TIM1, Ypwm); //设置pwm值
+    }
+}
+
+
+

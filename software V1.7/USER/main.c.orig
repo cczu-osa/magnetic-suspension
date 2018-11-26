@@ -1,0 +1,13 @@
+#include "init.h"
+int main(void)
+{
+	all_init();
+	for(;;)
+	{		
+		/********************************ADC采样*******************************/
+		adcx = Get_Adc_Average2();                   //adc2 通道2 PA2采样次数8次=Vx
+        adcx1 = Get_Adc_Average1();                    //adc1 通道1 PA1采样次数8次=Vy
+	}
+}
+
+
