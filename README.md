@@ -12,7 +12,7 @@
 4.  焊接调试
 
 # Picture
-
+## PCB
 ![](asset/pcb.png)
-## pcb
+## Finished
 ![](asset/effcet.gif)
